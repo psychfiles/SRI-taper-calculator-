@@ -13,7 +13,10 @@
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 20px; }
         .input-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 14px; }
-        input[type="number"] { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        /* Updated input styles for disabled state */
+        input[type="number"], select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        input[type="number"]:disabled { background-color: #eee; color: #999; cursor: not-allowed; }
+        
         .results-box { background: #eef2f7; padding: 15px; border-radius: 6px; border-left: 5px solid #3498db; }
         .result-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
         .result-val { font-weight: bold; color: #2c3e50; }
@@ -32,27 +35,49 @@
         .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; font-size: 14px; }
         .sub-text { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
         .error-msg { color: red; font-size: 14px; margin-top: 10px; display: none; }
+        
+        /* New styles for radio mode selection */
+        .mode-selector { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #eee; }
+        .radio-label { margin-right: 20px; font-weight: normal; display: inline-flex; align-items: center; cursor: pointer; }
+        .radio-label input { margin-right: 8px; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h2>1. Biological Parameters (Settings)</h2>
+    
+    <div class="mode-selector">
+        <span style="font-weight: 600; font-size: 14px; margin-right: 15px;">Input Mode:</span>
+        <label class="radio-label">
+            <input type="radio" name="inputMode" value="med" checked onchange="toggleInputMode()"> Select Medication
+        </label>
+        <label class="radio-label">
+            <input type="radio" name="inputMode" value="manual" onchange="toggleInputMode()"> Manual Entry
+        </label>
+    </div>
+
     <div class="grid">
         <div>
+             <div class="input-group" id="medSelectContainer">
+                <label for="medDropdown">Medication Selection</label>
+                <select id="medDropdown" onchange="updateFromDropdown()">
+                    </select>
+            </div>
+
             <div class="input-group">
                 <label>Emax (%)</label>
-                <input type="number" id="emax" value="92" oninput="calculateInstant()">
+                <input type="number" id="emax" disabled oninput="calculateInstant()">
             </div>
             <div class="input-group">
                 <label>ED50 (mg)</label>
-                <input type="number" id="ed50" value="7.7" oninput="calculateInstant()">
+                <input type="number" id="ed50" disabled oninput="calculateInstant()">
             </div>
         </div>
         <div>
             <div class="input-group">
                 <label>K1 (SERT Clearance)</label>
-                <input type="number" id="k1" value="4" oninput="updateR0(); calculateInstant()">
+                <input type="number" id="k1" value="5" oninput="updateR0(); calculateInstant()">
             </div>
             <div class="input-group">
                 <label>K2 (Background Clearance)</label>
@@ -62,7 +87,7 @@
                 <input type="checkbox" id="autoR0" checked onchange="updateR0(); calculateInstant()">
                 <label for="autoR0">Auto-set R0 (Baseline C=1)</label>
             </div>
-            <input type="hidden" id="r0" value="5">
+            <input type="hidden" id="r0" value="6">
         </div>
     </div>
 </div>
@@ -127,9 +152,74 @@
 <script>
     let myChart = null;
 
-    // --- MATH FUNCTIONS ---
+    // --- MEDICATION DATA ---
+    const MED_DATA = {
+        'citalopram': { name: 'Citalopram (Striatum)', emax: 83.98, ed50: 2.33 },
+        'desvenlafaxine': { name: 'Desvenlafaxine (Striatum)', emax: 100.22, ed50: 16.11 },
+        'duloxetine': { name: 'Duloxetine (Thalamus)', emax: 90.75, ed50: 6.27 },
+        'escitalopram': { name: 'Escitalopram (Dorsal Raphe)', emax: 89.57, ed50: 2.72 },
+        'fluoxetine': { name: 'Fluoxetine (Striatum)', emax: 86.12, ed50: 1.89 },
+        'paroxetine': { name: 'Paroxetine (Striatum)', emax: 97.14, ed50: 5.60 },
+        'sertraline': { name: 'Sertraline (Striatum)', emax: 92.01, ed50: 7.72 },
+        'venlafaxine': { name: 'Venlafaxine XR (Striatum)', emax: 90.07, ed50: 5.80 },
+        'vortioxetine': { name: 'Vortioxetine (Raphe Nuclei)', emax: 102.24, ed50: 4.68 }
+    };
+
+    // --- DROPDOWN & MODE LOGIC ---
+
+    function populateDropdown() {
+        const dropdown = document.getElementById('medDropdown');
+        for (const key in MED_DATA) {
+            let option = document.createElement('option');
+            option.value = key;
+            option.text = MED_DATA[key].name;
+            dropdown.add(option);
+        }
+        // Set default to Sertraline
+        dropdown.value = 'sertraline'; 
+    }
+
+    function toggleInputMode() {
+        const mode = document.querySelector('input[name="inputMode"]:checked').value;
+        const emaxInput = document.getElementById('emax');
+        const ed50Input = document.getElementById('ed50');
+        const medContainer = document.getElementById('medSelectContainer');
+
+        if (mode === 'med') {
+            // Disable manual inputs
+            emaxInput.disabled = true;
+            ed50Input.disabled = true;
+            // Enable dropdown visualization
+            medContainer.style.opacity = '1';
+            medContainer.style.pointerEvents = 'auto';
+            // Ensure values match dropdown
+            updateFromDropdown();
+        } else {
+            // Enable manual inputs
+            emaxInput.disabled = false;
+            ed50Input.disabled = false;
+             // Dim dropdown visualization to indicate inactivity
+            medContainer.style.opacity = '0.5';
+            medContainer.style.pointerEvents = 'none';
+        }
+        calculateInstant();
+    }
+
+    function updateFromDropdown() {
+        const selectedKey = document.getElementById('medDropdown').value;
+        const data = MED_DATA[selectedKey];
+        
+        // Update the inputs, which are currently disabled but used for calculations
+        document.getElementById('emax').value = data.emax;
+        document.getElementById('ed50').value = data.ed50;
+        calculateInstant();
+    }
+
+
+    // --- EXISTING MATH FUNCTIONS ---
 
     function getRO(dose) {
+        // These now read from the inputs, whether they were set manually or by the dropdown
         const emax = parseFloat(document.getElementById('emax').value);
         const ed50 = parseFloat(document.getElementById('ed50').value);
         if (dose <= 0) return 0;
@@ -140,6 +230,7 @@
         const emax = parseFloat(document.getElementById('emax').value);
         const ed50 = parseFloat(document.getElementById('ed50').value);
         
+        // Safety check if RO is too close to Emax asymptote
         if (ro >= emax - 0.0001) return 9999; 
         if (ro <= 0) return 0;
         
@@ -164,8 +255,10 @@
         const r0 = parseFloat(document.getElementById('r0').value);
         
         if (conc <= 0) return 0;
+        // Reverse the concentration formula to find Theta (RO decimal)
         let theta = (conc * (k1 + k2) - r0) / (conc * k1);
         
+        // Clamp results to realistic bounds
         if (theta < 0) theta = 0;
         if (theta > 1) theta = 1; 
 
@@ -181,27 +274,29 @@
     }
 
     function calculateInstant() {
-        // Placeholder
+        // Placeholder for potential future "live preview" features
     }
 
-    // --- MAIN GENERATOR LOGIC ---
+    // --- MAIN GENERATOR LOGIC (Unchanged) ---
 
     function generatePlan() {
         try {
+            // Reset UI
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('tableContainer').style.display = 'block';
 
             const startDose = parseFloat(document.getElementById('startDose').value);
             const nextDose = parseFloat(document.getElementById('nextDose').value);
             
+            // Validate inputs
             if (isNaN(startDose) || isNaN(nextDose)) {
                 throw new Error("Please enter valid numbers for dose.");
             }
 
-            // 1. Calculate the Drop Size
+            // 1. Calculate the Biological Drop Size
             const startConc = getConc(startDose);
             const nextConc = getConc(nextDose);
-            const baselineConc = getConc(0); 
+            const baselineConc = getConc(0); // Should be 1.0 if auto-R0 is on
 
             const dropSize = startConc - nextConc;
             
@@ -209,17 +304,14 @@
                  throw new Error("Next dose must be lower than current dose to create a taper.");
             }
 
-            // --- CHANGED LOGIC HERE ---
-            // Calculate absolute difference instead of percentage
             const absDropDisplay = (startConc * 100) - (nextConc * 100);
 
             // Update Preview Box
             document.getElementById('dispStartConc').innerText = (startConc * 100).toFixed(1);
             document.getElementById('dispNextConc').innerText = (nextConc * 100).toFixed(1);
             document.getElementById('dispAbsDrop').innerText = absDropDisplay.toFixed(1);
-            // --------------------------
 
-            // 2. Generate Table
+            // 2. Generate Table Loop
             const tbody = document.querySelector('#taperTable tbody');
             tbody.innerHTML = '';
 
@@ -227,14 +319,21 @@
             let step = 1;
             let chartLabels = [];
             let chartData = [];
-            let safety = 0;
+            let safety = 0; // prevent infinite loops
             
+            // Loop until concentration is close to baseline
             while (currentConc > baselineConc + 0.01 && safety < 1000) {
+                // Find required RO for this concentration step
                 let ro = getROFromConc(currentConc);
                 const emax = parseFloat(document.getElementById('emax').value);
+                
+                // Ensure RO doesn't exceed Emax (mathematical constraint of rational function)
                 if (ro > emax) ro = emax - 0.001;
 
+                // Convert that RO back to a Dose mg
                 let dose = getDoseFromRO(ro);
+                
+                // Calculate total percentage reduction from the starting point
                 let reductionFromPeak = ((startConc - currentConc) / startConc) * 100;
                 
                 addRow(step, dose, ro, currentConc * 100, reductionFromPeak);
@@ -242,16 +341,19 @@
                 chartLabels.push(step);
                 chartData.push(currentConc * 100);
 
+                // Decrement concentration linearly
                 currentConc -= dropSize;
                 step++;
                 safety++;
             }
 
+            // Add final zero step
             const totalReduction = ((startConc - baselineConc) / startConc) * 100;
             addRow(step, 0, 0, 100, totalReduction);
             chartLabels.push(step);
             chartData.push(100);
 
+            // 3. Generate Chart
             if (typeof Chart !== 'undefined') {
                 updateChart(chartLabels, chartData);
             }
@@ -305,7 +407,10 @@
         });
     }
 
+    // --- INITIALIZATION ---
     updateR0();
+    populateDropdown();
+    toggleInputMode(); // Initialize correct state based on default checked radio
 </script>
 
 </body>
