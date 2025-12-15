@@ -13,7 +13,7 @@
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 20px; }
         .input-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 14px; }
-        /* Updated input styles for disabled state */
+        
         input[type="number"], select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         input[type="number"]:disabled { background-color: #eee; color: #999; cursor: not-allowed; }
         
@@ -36,10 +36,11 @@
         .sub-text { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
         .error-msg { color: red; font-size: 14px; margin-top: 10px; display: none; }
         
-        /* New styles for radio mode selection */
         .mode-selector { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #eee; }
         .radio-label { margin-right: 20px; font-weight: normal; display: inline-flex; align-items: center; cursor: pointer; }
         .radio-label input { margin-right: 8px; }
+
+        .question-header { font-weight: 600; color: #2c3e50; margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -94,25 +95,40 @@
 
 <div class="container">
     <h2>2. Taper Plan Generator</h2>
-    <p class="sub-text">Enter a proposed dose reduction to see the biological impact. Then generate a plan that maintains that consistent impact speed.</p>
+    
+    <p class="question-header">
+         What was the first successfully tapered step without (or with minimal) withdrawal symptoms?
+    </p>
+    <p class="sub-text" style="margin-top:0;">Enter those doses below to calibrate the biological impact speed for the rest of the plan.</p>
     
     <div class="grid" style="grid-template-columns: 1fr 1.5fr;">
         <div>
             <div class="input-group">
-                <label>Current Dose (mg)</label>
+                <label>Initial Dose (mg)</label>
                 <input type="number" id="startDose" value="200" step="1">
             </div>
             <div class="input-group">
-                <label>Proposed Next Dose (mg)</label>
+                <label>Tolerated Next Dose (mg)</label>
                 <input type="number" id="nextDose" value="150" step="1">
             </div>
-            <button onclick="generatePlan()">Calculate & Generate Plan</button>
+
+            <div class="input-group" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                <label for="taperMethod">Plan Generation Method</label>
+                <select id="taperMethod" onchange="updatePreviewLabels()">
+                    <option value="absolute" selected>Fixed Absolute Reduction</option>
+                    <option value="relative">Fixed Relative Reduction</option>
+                </select>
+            </div>
+            <p class="sub-text">Choose whether subsequent steps remove the same *amount* of 5-HT effect, or the same *percentage* of remaining effect.</p>
+
+
+            <button onclick="generatePlan()" style="margin-top: 10px;">Calculate & Generate Plan</button>
             <div id="errorBox" class="error-msg"></div>
         </div>
 
         <div class="results-box" id="previewBox">
             <div class="result-row">
-                <span>Start 5-HT Level:</span>
+                <span>Initial 5-HT Level:</span>
                 <span class="result-val" id="dispStartConc">-</span>
             </div>
             <div class="result-row">
@@ -121,15 +137,15 @@
             </div>
             <hr style="border-top:1px solid #dcdde1; border-bottom:none;">
             <div class="result-row" style="font-size: 1.1em;">
-                <span>Absolute Drop:</span>
-                <span class="result-val highlight" id="dispAbsDrop">-</span>
+                <span id="previewLabel">Fixed Absolute Drop:</span>
+                <span class="result-val highlight" id="dispDropMetric">-</span>
             </div>
-            <div class="sub-text">This is the arithmetic difference (Start - Next).</div>
+            <div class="sub-text" id="previewSubText">This is the arithmetic difference used for future steps.</div>
         </div>
     </div>
 
     <div id="tableContainer" style="display:none;">
-        <h3>Generated Linear-Biological Taper Plan</h3>
+        <h3>Generated Biological Taper Plan</h3>
         <table id="taperTable">
             <thead>
                 <tr>
@@ -137,7 +153,7 @@
                     <th>Dose (mg)</th>
                     <th>RO (%)</th>
                     <th>5-HT Level<br>(% of Base)</th>
-                    <th>Reduction<br>from Peak (%)</th>
+                    <th>Step Reduction<br>(%)</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -150,8 +166,6 @@
 </div>
 
 <script>
-    let myChart = null;
-
     // --- MEDICATION DATA ---
     const MED_DATA = {
         'citalopram': { name: 'Citalopram (Striatum)', emax: 83.98, ed50: 2.33 },
@@ -165,7 +179,7 @@
         'vortioxetine': { name: 'Vortioxetine (Raphe Nuclei)', emax: 102.24, ed50: 4.68 }
     };
 
-    // --- DROPDOWN & MODE LOGIC ---
+    // --- UI LOGIC ---
 
     function populateDropdown() {
         const dropdown = document.getElementById('medDropdown');
@@ -175,51 +189,46 @@
             option.text = MED_DATA[key].name;
             dropdown.add(option);
         }
-        // Set default to Sertraline
         dropdown.value = 'sertraline'; 
     }
 
     function toggleInputMode() {
         const mode = document.querySelector('input[name="inputMode"]:checked').value;
-        const emaxInput = document.getElementById('emax');
-        const ed50Input = document.getElementById('ed50');
+        document.getElementById('emax').disabled = (mode === 'med');
+        document.getElementById('ed50').disabled = (mode === 'med');
         const medContainer = document.getElementById('medSelectContainer');
-
-        if (mode === 'med') {
-            // Disable manual inputs
-            emaxInput.disabled = true;
-            ed50Input.disabled = true;
-            // Enable dropdown visualization
-            medContainer.style.opacity = '1';
-            medContainer.style.pointerEvents = 'auto';
-            // Ensure values match dropdown
-            updateFromDropdown();
-        } else {
-            // Enable manual inputs
-            emaxInput.disabled = false;
-            ed50Input.disabled = false;
-             // Dim dropdown visualization to indicate inactivity
-            medContainer.style.opacity = '0.5';
-            medContainer.style.pointerEvents = 'none';
-        }
-        calculateInstant();
+        medContainer.style.opacity = (mode === 'med') ? '1' : '0.5';
+        medContainer.style.pointerEvents = (mode === 'med') ? 'auto' : 'none';
+        if (mode === 'med') updateFromDropdown();
     }
 
     function updateFromDropdown() {
         const selectedKey = document.getElementById('medDropdown').value;
-        const data = MED_DATA[selectedKey];
+        document.getElementById('emax').value = MED_DATA[selectedKey].emax;
+        document.getElementById('ed50').value = MED_DATA[selectedKey].ed50;
+    }
+
+    function updatePreviewLabels() {
+        const method = document.getElementById('taperMethod').value;
+        const label = document.getElementById('previewLabel');
+        const subtext = document.getElementById('previewSubText');
         
-        // Update the inputs, which are currently disabled but used for calculations
-        document.getElementById('emax').value = data.emax;
-        document.getElementById('ed50').value = data.ed50;
-        calculateInstant();
+        if (method === 'absolute') {
+            label.innerText = "Fixed Absolute Drop:";
+            subtext.innerText = "Subsequent steps will remove this constant amount of 5-HT effect.";
+        } else {
+            label.innerText = "Fixed Relative Drop:";
+            subtext.innerText = "Subsequent steps will reduce the remaining 5-HT effect by this constant percentage.";
+        }
+        if(document.getElementById('dispStartConc').innerText !== '-') {
+             generatePlan();
+        }
     }
 
 
-    // --- EXISTING MATH FUNCTIONS ---
+    // --- MATH FUNCTIONS ---
 
     function getRO(dose) {
-        // These now read from the inputs, whether they were set manually or by the dropdown
         const emax = parseFloat(document.getElementById('emax').value);
         const ed50 = parseFloat(document.getElementById('ed50').value);
         if (dose <= 0) return 0;
@@ -229,11 +238,8 @@
     function getDoseFromRO(ro) {
         const emax = parseFloat(document.getElementById('emax').value);
         const ed50 = parseFloat(document.getElementById('ed50').value);
-        
-        // Safety check if RO is too close to Emax asymptote
         if (ro >= emax - 0.0001) return 9999; 
         if (ro <= 0) return 0;
-        
         return (ro * ed50) / (emax - ro);
     }
 
@@ -242,7 +248,6 @@
         const k2 = parseFloat(document.getElementById('k2').value);
         const r0 = parseFloat(document.getElementById('r0').value);
         const ro = getRO(dose); 
-        
         const theta = ro / 100.0;
         const denom = k1 * (1.0 - theta) + k2;
         if (denom === 0) return 0;
@@ -253,15 +258,10 @@
         const k1 = parseFloat(document.getElementById('k1').value);
         const k2 = parseFloat(document.getElementById('k2').value);
         const r0 = parseFloat(document.getElementById('r0').value);
-        
         if (conc <= 0) return 0;
-        // Reverse the concentration formula to find Theta (RO decimal)
         let theta = (conc * (k1 + k2) - r0) / (conc * k1);
-        
-        // Clamp results to realistic bounds
         if (theta < 0) theta = 0;
         if (theta > 1) theta = 1; 
-
         return theta * 100.0; 
     }
 
@@ -273,87 +273,102 @@
         }
     }
 
-    function calculateInstant() {
-        // Placeholder for potential future "live preview" features
-    }
+    function calculateInstant() { }
 
-    // --- MAIN GENERATOR LOGIC (Unchanged) ---
+    // --- MAIN GENERATOR LOGIC ---
 
     function generatePlan() {
         try {
-            // Reset UI
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('tableContainer').style.display = 'block';
 
             const startDose = parseFloat(document.getElementById('startDose').value);
             const nextDose = parseFloat(document.getElementById('nextDose').value);
+            const taperMethod = document.getElementById('taperMethod').value;
             
-            // Validate inputs
             if (isNaN(startDose) || isNaN(nextDose)) {
                 throw new Error("Please enter valid numbers for dose.");
             }
 
-            // 1. Calculate the Biological Drop Size
             const startConc = getConc(startDose);
             const nextConc = getConc(nextDose);
-            const baselineConc = getConc(0); // Should be 1.0 if auto-R0 is on
+            const baselineConc = getConc(0);
 
-            const dropSize = startConc - nextConc;
-            
-            if (dropSize <= 0) {
-                 throw new Error("Next dose must be lower than current dose to create a taper.");
+            if (nextConc >= startConc) {
+                 throw new Error("Tolerated next dose must result in lower 5-HT level than initial dose.");
             }
 
-            const absDropDisplay = (startConc * 100) - (nextConc * 100);
+            const absDropSize = startConc - nextConc;
+            const relDropRatio = nextConc / startConc; 
 
-            // Update Preview Box
             document.getElementById('dispStartConc').innerText = (startConc * 100).toFixed(1);
             document.getElementById('dispNextConc').innerText = (nextConc * 100).toFixed(1);
-            document.getElementById('dispAbsDrop').innerText = absDropDisplay.toFixed(1);
+            
+            const previewVal = document.getElementById('dispDropMetric');
+            if (taperMethod === 'absolute') {
+                 previewVal.innerText = (absDropSize * 100).toFixed(1);
+            } else {
+                 previewVal.innerText = ((1 - relDropRatio) * 100).toFixed(1) + "%";
+            }
+            // Temporarily suppress update to avoid recursion loop if called by updatePreviewLabels
+            // updatePreviewLabels(); 
 
-            // 2. Generate Table Loop
+            // 2. Generate Table
             const tbody = document.querySelector('#taperTable tbody');
             tbody.innerHTML = '';
 
             let currentConc = startConc;
+            let previousConc = startConc; // NEW: Track previous for relative calc
             let step = 1;
             let chartLabels = [];
             let chartData = [];
-            let safety = 0; // prevent infinite loops
+            let safety = 0;
             
-            // Loop until concentration is close to baseline
-            while (currentConc > baselineConc + 0.01 && safety < 1000) {
-                // Find required RO for this concentration step
+            while (currentConc > baselineConc + 0.001 && safety < 1500) {
                 let ro = getROFromConc(currentConc);
                 const emax = parseFloat(document.getElementById('emax').value);
-                
-                // Ensure RO doesn't exceed Emax (mathematical constraint of rational function)
-                if (ro > emax) ro = emax - 0.001;
+                if (ro > emax) ro = emax - 0.0001;
 
-                // Convert that RO back to a Dose mg
                 let dose = getDoseFromRO(ro);
+                if (dose < 0.01) dose = 0; 
+
+                // NEW: Calculate drop from *previous* step (or 0 for first step)
+                let dropFromPrior = 0;
+                if (step > 1) {
+                    dropFromPrior = ((previousConc - currentConc) / previousConc) * 100;
+                }
                 
-                // Calculate total percentage reduction from the starting point
-                let reductionFromPeak = ((startConc - currentConc) / startConc) * 100;
-                
-                addRow(step, dose, ro, currentConc * 100, reductionFromPeak);
+                addRow(step, dose, ro, currentConc * 100, dropFromPrior);
                 
                 chartLabels.push(step);
                 chartData.push(currentConc * 100);
 
-                // Decrement concentration linearly
-                currentConc -= dropSize;
+                if (dose === 0) break; 
+
+                // Prepare for next iteration
+                previousConc = currentConc; // Store current as previous
+
+                if (taperMethod === 'absolute') {
+                    currentConc -= absDropSize; 
+                } else {
+                    currentConc = currentConc * relDropRatio; 
+                }
+
                 step++;
                 safety++;
             }
 
-            // Add final zero step
-            const totalReduction = ((startConc - baselineConc) / startConc) * 100;
-            addRow(step, 0, 0, 100, totalReduction);
-            chartLabels.push(step);
-            chartData.push(100);
+            // Final zero step if needed
+            if (chartData[chartData.length-1] > baselineConc * 100 + 0.1) {
+                 // Calculate final drop
+                 let finalDrop = ((previousConc - baselineConc) / previousConc) * 100;
+                 addRow(step, 0, 0, baselineConc * 100, finalDrop);
+                 chartLabels.push(step);
+                 chartData.push(baselineConc * 100);
+            }
 
-            // 3. Generate Chart
+
+            // 3. Generate Chart (FIXED for "Canvas already in use")
             if (typeof Chart !== 'undefined') {
                 updateChart(chartLabels, chartData);
             }
@@ -366,7 +381,7 @@
         }
     }
 
-    function addRow(step, dose, ro, concPct, redPct) {
+    function addRow(step, dose, ro, concPct, dropPct) {
         const tbody = document.querySelector('#taperTable tbody');
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -374,16 +389,22 @@
             <td>${dose.toFixed(2)}</td>
             <td>${ro.toFixed(1)}</td>
             <td>${concPct.toFixed(1)}</td>
-            <td>${redPct.toFixed(1)}</td>
+            <td>${dropPct.toFixed(1)}%</td>
         `;
         tbody.appendChild(tr);
     }
 
     function updateChart(labels, data) {
         const ctx = document.getElementById('taperChart').getContext('2d');
-        if (myChart) { myChart.destroy(); }
+        
+        // --- FIX: CHECK AND DESTROY EXISTING CHART INSTANCE ---
+        const existingChart = Chart.getChart("taperChart");
+        if (existingChart) {
+            existingChart.destroy();
+        }
+        // -----------------------------------------------------
 
-        myChart = new Chart(ctx, {
+        new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
@@ -410,7 +431,8 @@
     // --- INITIALIZATION ---
     updateR0();
     populateDropdown();
-    toggleInputMode(); // Initialize correct state based on default checked radio
+    toggleInputMode(); 
+    updatePreviewLabels(); 
 </script>
 
 </body>
