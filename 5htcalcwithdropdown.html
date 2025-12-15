@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SRI Taper Plan Generator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; color: #333; padding: 20px; max-width: 900px; margin: 0 auto; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        h1, h2 { margin-top: 0; color: #2c3e50; }
+        h2 { font-size: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 20px; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 14px; }
+        /* Updated input styles for disabled state */
+        input[type="number"], select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        input[type="number"]:disabled { background-color: #eee; color: #999; cursor: not-allowed; }
+        
+        .results-box { background: #eef2f7; padding: 15px; border-radius: 6px; border-left: 5px solid #3498db; }
+        .result-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
+        .result-val { font-weight: bold; color: #2c3e50; }
+        .highlight { color: #e74c3c; font-weight: bold; }
+        
+        button { background-color: #3498db; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; transition: background 0.2s; font-weight: 600; }
+        button:hover { background-color: #2980b9; }
+        button:active { background-color: #1f618d; transform: translateY(1px); }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+        th, td { padding: 10px; text-align: right; border-bottom: 1px solid #eee; }
+        th { text-align: right; background-color: #f8f9fa; color: #666; font-weight: 600; }
+        tr:nth-child(even) { background-color: #fcfcfc; }
+        tr:hover { background-color: #f1f1f1; }
+
+        .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; font-size: 14px; }
+        .sub-text { font-size: 12px; color: #7f8c8d; margin-top: 4px; }
+        .error-msg { color: red; font-size: 14px; margin-top: 10px; display: none; }
+        
+        /* New styles for radio mode selection */
+        .mode-selector { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #eee; }
+        .radio-label { margin-right: 20px; font-weight: normal; display: inline-flex; align-items: center; cursor: pointer; }
+        .radio-label input { margin-right: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>1. Biological Parameters (Settings)</h2>
+    
+    <div class="mode-selector">
+        <span style="font-weight: 600; font-size: 14px; margin-right: 15px;">Input Mode:</span>
+        <label class="radio-label">
+            <input type="radio" name="inputMode" value="med" checked onchange="toggleInputMode()"> Select Medication
+        </label>
+        <label class="radio-label">
+            <input type="radio" name="inputMode" value="manual" onchange="toggleInputMode()"> Manual Entry
+        </label>
+    </div>
+
+    <div class="grid">
+        <div>
+             <div class="input-group" id="medSelectContainer">
+                <label for="medDropdown">Medication Selection</label>
+                <select id="medDropdown" onchange="updateFromDropdown()">
+                    </select>
+            </div>
+
+            <div class="input-group">
+                <label>Emax (%)</label>
+                <input type="number" id="emax" disabled oninput="calculateInstant()">
+            </div>
+            <div class="input-group">
+                <label>ED50 (mg)</label>
+                <input type="number" id="ed50" disabled oninput="calculateInstant()">
+            </div>
+        </div>
+        <div>
+            <div class="input-group">
+                <label>K1 (SERT Clearance)</label>
+                <input type="number" id="k1" value="5" oninput="updateR0(); calculateInstant()">
+            </div>
+            <div class="input-group">
+                <label>K2 (Background Clearance)</label>
+                <input type="number" id="k2" value="1" oninput="updateR0(); calculateInstant()">
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="autoR0" checked onchange="updateR0(); calculateInstant()">
+                <label for="autoR0">Auto-set R0 (Baseline C=1)</label>
+            </div>
+            <input type="hidden" id="r0" value="6">
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <h2>2. Taper Plan Generator</h2>
+    <p class="sub-text">Enter a proposed dose reduction to see the biological impact. Then generate a plan that maintains that consistent impact speed.</p>
+    
+    <div class="grid" style="grid-template-columns: 1fr 1.5fr;">
+        <div>
+            <div class="input-group">
+                <label>Current Dose (mg)</label>
+                <input type="number" id="startDose" value="200" step="1">
+            </div>
+            <div class="input-group">
+                <label>Proposed Next Dose (mg)</label>
+                <input type="number" id="nextDose" value="150" step="1">
+            </div>
+            <button onclick="generatePlan()">Calculate & Generate Plan</button>
+            <div id="errorBox" class="error-msg"></div>
+        </div>
+
+        <div class="results-box" id="previewBox">
+            <div class="result-row">
+                <span>Start 5-HT Level:</span>
+                <span class="result-val" id="dispStartConc">-</span>
+            </div>
+            <div class="result-row">
+                <span>Next 5-HT Level:</span>
+                <span class="result-val" id="dispNextConc">-</span>
+            </div>
+            <hr style="border-top:1px solid #dcdde1; border-bottom:none;">
+            <div class="result-row" style="font-size: 1.1em;">
+                <span>Absolute Drop:</span>
+                <span class="result-val highlight" id="dispAbsDrop">-</span>
+            </div>
+            <div class="sub-text">This is the arithmetic difference (Start - Next).</div>
+        </div>
+    </div>
+
+    <div id="tableContainer" style="display:none;">
+        <h3>Generated Linear-Biological Taper Plan</h3>
+        <table id="taperTable">
+            <thead>
+                <tr>
+                    <th>Step</th>
+                    <th>Dose (mg)</th>
+                    <th>RO (%)</th>
+                    <th>5-HT Level<br>(% of Base)</th>
+                    <th>Reduction<br>from Peak (%)</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    
+    <div style="margin-top: 30px;">
+        <canvas id="taperChart" style="max-height: 300px;"></canvas>
+    </div>
+</div>
+
+<script>
+    let myChart = null;
+
+    // --- MEDICATION DATA ---
+    const MED_DATA = {
+        'citalopram': { name: 'Citalopram (Striatum)', emax: 83.98, ed50: 2.33 },
+        'desvenlafaxine': { name: 'Desvenlafaxine (Striatum)', emax: 100.22, ed50: 16.11 },
+        'duloxetine': { name: 'Duloxetine (Thalamus)', emax: 90.75, ed50: 6.27 },
+        'escitalopram': { name: 'Escitalopram (Dorsal Raphe)', emax: 89.57, ed50: 2.72 },
+        'fluoxetine': { name: 'Fluoxetine (Striatum)', emax: 86.12, ed50: 1.89 },
+        'paroxetine': { name: 'Paroxetine (Striatum)', emax: 97.14, ed50: 5.60 },
+        'sertraline': { name: 'Sertraline (Striatum)', emax: 92.01, ed50: 7.72 },
+        'venlafaxine': { name: 'Venlafaxine XR (Striatum)', emax: 90.07, ed50: 5.80 },
+        'vortioxetine': { name: 'Vortioxetine (Raphe Nuclei)', emax: 102.24, ed50: 4.68 }
+    };
+
+    // --- DROPDOWN & MODE LOGIC ---
+
+    function populateDropdown() {
+        const dropdown = document.getElementById('medDropdown');
+        for (const key in MED_DATA) {
+            let option = document.createElement('option');
+            option.value = key;
+            option.text = MED_DATA[key].name;
+            dropdown.add(option);
+        }
+        // Set default to Sertraline
+        dropdown.value = 'sertraline'; 
+    }
+
+    function toggleInputMode() {
+        const mode = document.querySelector('input[name="inputMode"]:checked').value;
+        const emaxInput = document.getElementById('emax');
+        const ed50Input = document.getElementById('ed50');
+        const medContainer = document.getElementById('medSelectContainer');
+
+        if (mode === 'med') {
+            // Disable manual inputs
+            emaxInput.disabled = true;
+            ed50Input.disabled = true;
+            // Enable dropdown visualization
+            medContainer.style.opacity = '1';
+            medContainer.style.pointerEvents = 'auto';
+            // Ensure values match dropdown
+            updateFromDropdown();
+        } else {
+            // Enable manual inputs
+            emaxInput.disabled = false;
+            ed50Input.disabled = false;
+             // Dim dropdown visualization to indicate inactivity
+            medContainer.style.opacity = '0.5';
+            medContainer.style.pointerEvents = 'none';
+        }
+        calculateInstant();
+    }
+
+    function updateFromDropdown() {
+        const selectedKey = document.getElementById('medDropdown').value;
+        const data = MED_DATA[selectedKey];
+        
+        // Update the inputs, which are currently disabled but used for calculations
+        document.getElementById('emax').value = data.emax;
+        document.getElementById('ed50').value = data.ed50;
+        calculateInstant();
+    }
+
+
+    // --- EXISTING MATH FUNCTIONS ---
+
+    function getRO(dose) {
+        // These now read from the inputs, whether they were set manually or by the dropdown
+        const emax = parseFloat(document.getElementById('emax').value);
+        const ed50 = parseFloat(document.getElementById('ed50').value);
+        if (dose <= 0) return 0;
+        return (emax * dose) / (ed50 + dose);
+    }
+
+    function getDoseFromRO(ro) {
+        const emax = parseFloat(document.getElementById('emax').value);
+        const ed50 = parseFloat(document.getElementById('ed50').value);
+        
+        // Safety check if RO is too close to Emax asymptote
+        if (ro >= emax - 0.0001) return 9999; 
+        if (ro <= 0) return 0;
+        
+        return (ro * ed50) / (emax - ro);
+    }
+
+    function getConc(dose) {
+        const k1 = parseFloat(document.getElementById('k1').value);
+        const k2 = parseFloat(document.getElementById('k2').value);
+        const r0 = parseFloat(document.getElementById('r0').value);
+        const ro = getRO(dose); 
+        
+        const theta = ro / 100.0;
+        const denom = k1 * (1.0 - theta) + k2;
+        if (denom === 0) return 0;
+        return r0 / denom;
+    }
+
+    function getROFromConc(conc) {
+        const k1 = parseFloat(document.getElementById('k1').value);
+        const k2 = parseFloat(document.getElementById('k2').value);
+        const r0 = parseFloat(document.getElementById('r0').value);
+        
+        if (conc <= 0) return 0;
+        // Reverse the concentration formula to find Theta (RO decimal)
+        let theta = (conc * (k1 + k2) - r0) / (conc * k1);
+        
+        // Clamp results to realistic bounds
+        if (theta < 0) theta = 0;
+        if (theta > 1) theta = 1; 
+
+        return theta * 100.0; 
+    }
+
+    function updateR0() {
+        const k1 = parseFloat(document.getElementById('k1').value);
+        const k2 = parseFloat(document.getElementById('k2').value);
+        if (document.getElementById('autoR0').checked) {
+            document.getElementById('r0').value = k1 + k2;
+        }
+    }
+
+    function calculateInstant() {
+        // Placeholder for potential future "live preview" features
+    }
+
+    // --- MAIN GENERATOR LOGIC (Unchanged) ---
+
+    function generatePlan() {
+        try {
+            // Reset UI
+            document.getElementById('errorBox').style.display = 'none';
+            document.getElementById('tableContainer').style.display = 'block';
+
+            const startDose = parseFloat(document.getElementById('startDose').value);
+            const nextDose = parseFloat(document.getElementById('nextDose').value);
+            
+            // Validate inputs
+            if (isNaN(startDose) || isNaN(nextDose)) {
+                throw new Error("Please enter valid numbers for dose.");
+            }
+
+            // 1. Calculate the Biological Drop Size
+            const startConc = getConc(startDose);
+            const nextConc = getConc(nextDose);
+            const baselineConc = getConc(0); // Should be 1.0 if auto-R0 is on
+
+            const dropSize = startConc - nextConc;
+            
+            if (dropSize <= 0) {
+                 throw new Error("Next dose must be lower than current dose to create a taper.");
+            }
+
+            const absDropDisplay = (startConc * 100) - (nextConc * 100);
+
+            // Update Preview Box
+            document.getElementById('dispStartConc').innerText = (startConc * 100).toFixed(1);
+            document.getElementById('dispNextConc').innerText = (nextConc * 100).toFixed(1);
+            document.getElementById('dispAbsDrop').innerText = absDropDisplay.toFixed(1);
+
+            // 2. Generate Table Loop
+            const tbody = document.querySelector('#taperTable tbody');
+            tbody.innerHTML = '';
+
+            let currentConc = startConc;
+            let step = 1;
+            let chartLabels = [];
+            let chartData = [];
+            let safety = 0; // prevent infinite loops
+            
+            // Loop until concentration is close to baseline
+            while (currentConc > baselineConc + 0.01 && safety < 1000) {
+                // Find required RO for this concentration step
+                let ro = getROFromConc(currentConc);
+                const emax = parseFloat(document.getElementById('emax').value);
+                
+                // Ensure RO doesn't exceed Emax (mathematical constraint of rational function)
+                if (ro > emax) ro = emax - 0.001;
+
+                // Convert that RO back to a Dose mg
+                let dose = getDoseFromRO(ro);
+                
+                // Calculate total percentage reduction from the starting point
+                let reductionFromPeak = ((startConc - currentConc) / startConc) * 100;
+                
+                addRow(step, dose, ro, currentConc * 100, reductionFromPeak);
+                
+                chartLabels.push(step);
+                chartData.push(currentConc * 100);
+
+                // Decrement concentration linearly
+                currentConc -= dropSize;
+                step++;
+                safety++;
+            }
+
+            // Add final zero step
+            const totalReduction = ((startConc - baselineConc) / startConc) * 100;
+            addRow(step, 0, 0, 100, totalReduction);
+            chartLabels.push(step);
+            chartData.push(100);
+
+            // 3. Generate Chart
+            if (typeof Chart !== 'undefined') {
+                updateChart(chartLabels, chartData);
+            }
+
+        } catch (err) {
+            const errBox = document.getElementById('errorBox');
+            errBox.innerText = "Error: " + err.message;
+            errBox.style.display = 'block';
+            console.error(err);
+        }
+    }
+
+    function addRow(step, dose, ro, concPct, redPct) {
+        const tbody = document.querySelector('#taperTable tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${step}</td>
+            <td>${dose.toFixed(2)}</td>
+            <td>${ro.toFixed(1)}</td>
+            <td>${concPct.toFixed(1)}</td>
+            <td>${redPct.toFixed(1)}</td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    function updateChart(labels, data) {
+        const ctx = document.getElementById('taperChart').getContext('2d');
+        if (myChart) { myChart.destroy(); }
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '5-HT Level (% of Baseline)',
+                    data: data,
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    fill: true,
+                    tension: 0.1,
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { title: { display: true, text: 'Step Number' } },
+                    y: { title: { display: true, text: '5-HT Level (%)' } }
+                }
+            }
+        });
+    }
+
+    // --- INITIALIZATION ---
+    updateR0();
+    populateDropdown();
+    toggleInputMode(); // Initialize correct state based on default checked radio
+</script>
+
+</body>
+</html>
