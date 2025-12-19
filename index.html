@@ -40,7 +40,9 @@
         .radio-label { margin-right: 20px; font-weight: normal; display: inline-flex; align-items: center; cursor: pointer; }
         .radio-label input { margin-right: 8px; }
 
-        .question-header { font-weight: 600; color: #2c3e50; margin-bottom: 10px; }
+        .question-header { font-weight: 600; color: #2c3e50; margin-bottom: 10px; min-height: 40px;}
+        
+        .calib-toggle { background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #eee; }
     </style>
 </head>
 <body>
@@ -96,10 +98,19 @@
 <div class="container">
     <h2>2. Taper Plan Generator</h2>
     
-    <p class="question-header">
+    <div class="calib-toggle">
+        <span style="font-weight: 600; font-size: 14px; margin-right: 15px;">Define Drop Size By:</span>
+        <label class="radio-label">
+            <input type="radio" name="calibMode" value="dose" checked onchange="toggleCalibMode()"> Past Tolerated Dose
+        </label>
+        <label class="radio-label">
+            <input type="radio" name="calibMode" value="percent" onchange="toggleCalibMode()"> Target % Reduction
+        </label>
+    </div>
+
+    <p class="question-header" id="dynamicHeader">
          What was the first successfully tapered step without (or with minimal) withdrawal symptoms?
     </p>
-    <p class="sub-text" style="margin-top:0;">Enter those doses below to calibrate the biological impact speed for the rest of the plan.</p>
     
     <div class="grid" style="grid-template-columns: 1fr 1.5fr;">
         <div>
@@ -107,9 +118,15 @@
                 <label>Initial Dose (mg)</label>
                 <input type="number" id="startDose" value="200" step="1">
             </div>
-            <div class="input-group">
+
+            <div class="input-group" id="groupNextDose">
                 <label>Tolerated Next Dose (mg)</label>
                 <input type="number" id="nextDose" value="150" step="1">
+            </div>
+
+            <div class="input-group" id="groupPctDrop" style="display:none;">
+                <label>Desired 5-HT Reduction (%)</label>
+                <input type="number" id="desiredPct" value="2.9" step="0.1">
             </div>
 
             <div class="input-group" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 20px;">
@@ -119,8 +136,7 @@
                     <option value="relative">Fixed Relative Reduction</option>
                 </select>
             </div>
-            <p class="sub-text">Choose whether subsequent steps remove the same *amount* of 5-HT effect, or the same *percentage* of remaining effect.</p>
-
+            <p class="sub-text">This determines if future steps subtract a constant amount or a constant percentage.</p>
 
             <button onclick="generatePlan()" style="margin-top: 10px;">Calculate & Generate Plan</button>
             <div id="errorBox" class="error-msg"></div>
@@ -128,13 +144,18 @@
 
         <div class="results-box" id="previewBox">
             <div class="result-row">
-                <span>Initial 5-HT Level:</span>
+                <span>Start 5-HT Level:</span>
                 <span class="result-val" id="dispStartConc">-</span>
             </div>
             <div class="result-row">
                 <span>Next 5-HT Level:</span>
                 <span class="result-val" id="dispNextConc">-</span>
             </div>
+             <div class="result-row" id="calcDoseRow" style="display:none;">
+                <span>Implied Next Dose:</span>
+                <span class="result-val highlight" id="dispCalcDose">-</span>
+            </div>
+
             <hr style="border-top:1px solid #dcdde1; border-bottom:none;">
             <div class="result-row" style="font-size: 1.1em;">
                 <span id="previewLabel">Fixed Absolute Drop:</span>
@@ -200,6 +221,26 @@
         medContainer.style.opacity = (mode === 'med') ? '1' : '0.5';
         medContainer.style.pointerEvents = (mode === 'med') ? 'auto' : 'none';
         if (mode === 'med') updateFromDropdown();
+    }
+    
+    function toggleCalibMode() {
+        const calibMode = document.querySelector('input[name="calibMode"]:checked').value;
+        const groupDose = document.getElementById('groupNextDose');
+        const groupPct = document.getElementById('groupPctDrop');
+        const header = document.getElementById('dynamicHeader');
+        const calcRow = document.getElementById('calcDoseRow');
+
+        if (calibMode === 'dose') {
+            groupDose.style.display = 'block';
+            groupPct.style.display = 'none';
+            header.innerText = "What was the first successfully tapered step without (or with minimal) withdrawal symptoms?";
+            calcRow.style.display = 'none';
+        } else {
+            groupDose.style.display = 'none';
+            groupPct.style.display = 'block';
+            header.innerText = "Enter your current dose and the specific % reduction in 5-HT you want to achieve per step.";
+            calcRow.style.display = 'flex';
+        }
     }
 
     function updateFromDropdown() {
@@ -282,25 +323,51 @@
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('tableContainer').style.display = 'block';
 
+            // Gather inputs
             const startDose = parseFloat(document.getElementById('startDose').value);
-            const nextDose = parseFloat(document.getElementById('nextDose').value);
+            const calibMode = document.querySelector('input[name="calibMode"]:checked').value;
             const taperMethod = document.getElementById('taperMethod').value;
             
-            if (isNaN(startDose) || isNaN(nextDose)) {
-                throw new Error("Please enter valid numbers for dose.");
-            }
+            if (isNaN(startDose) || startDose <= 0) throw new Error("Please enter a valid starting dose.");
 
             const startConc = getConc(startDose);
-            const nextConc = getConc(nextDose);
             const baselineConc = getConc(0);
+            
+            let nextConc, nextDoseCalc;
+            let absDropSize, relDropRatio;
 
-            if (nextConc >= startConc) {
-                 throw new Error("Tolerated next dose must result in lower 5-HT level than initial dose.");
+            // --- CALCULATE DROP SIZE BASED ON MODE ---
+            if (calibMode === 'dose') {
+                // Mode A: Dose-Based
+                const nextDoseInput = parseFloat(document.getElementById('nextDose').value);
+                if (isNaN(nextDoseInput)) throw new Error("Please enter a valid next dose.");
+                
+                nextConc = getConc(nextDoseInput);
+                if (nextConc >= startConc) throw new Error("Next dose must result in lower 5-HT level.");
+                
+                absDropSize = startConc - nextConc;
+                relDropRatio = nextConc / startConc;
+                
+            } else {
+                // Mode B: Percent-Based
+                const desiredPct = parseFloat(document.getElementById('desiredPct').value);
+                if (isNaN(desiredPct) || desiredPct <= 0 || desiredPct >= 100) throw new Error("Please enter a valid percentage (0-100).");
+
+                const reductionFactor = desiredPct / 100.0;
+                absDropSize = startConc * reductionFactor;
+                nextConc = startConc - absDropSize;
+                relDropRatio = nextConc / startConc;
+                
+                // Calculate implicit dose for display
+                let nextRO = getROFromConc(nextConc);
+                const emax = parseFloat(document.getElementById('emax').value);
+                if (nextRO > emax) nextRO = emax - 0.0001;
+                nextDoseCalc = getDoseFromRO(nextRO);
+                
+                document.getElementById('dispCalcDose').innerText = nextDoseCalc.toFixed(2) + " mg";
             }
 
-            const absDropSize = startConc - nextConc;
-            const relDropRatio = nextConc / startConc; 
-
+            // --- UPDATE PREVIEW BOX ---
             document.getElementById('dispStartConc').innerText = (startConc * 100).toFixed(1);
             document.getElementById('dispNextConc').innerText = (nextConc * 100).toFixed(1);
             
@@ -310,15 +377,13 @@
             } else {
                  previewVal.innerText = ((1 - relDropRatio) * 100).toFixed(1) + "%";
             }
-            // Temporarily suppress update to avoid recursion loop if called by updatePreviewLabels
-            // updatePreviewLabels(); 
 
-            // 2. Generate Table
+            // --- GENERATE TABLE ---
             const tbody = document.querySelector('#taperTable tbody');
             tbody.innerHTML = '';
 
             let currentConc = startConc;
-            let previousConc = startConc; // NEW: Track previous for relative calc
+            let previousConc = startConc; 
             let step = 1;
             let chartLabels = [];
             let chartData = [];
@@ -332,7 +397,7 @@
                 let dose = getDoseFromRO(ro);
                 if (dose < 0.01) dose = 0; 
 
-                // NEW: Calculate drop from *previous* step (or 0 for first step)
+                // Calculate drop from previous step
                 let dropFromPrior = 0;
                 if (step > 1) {
                     dropFromPrior = ((previousConc - currentConc) / previousConc) * 100;
@@ -345,9 +410,9 @@
 
                 if (dose === 0) break; 
 
-                // Prepare for next iteration
-                previousConc = currentConc; // Store current as previous
+                previousConc = currentConc; 
 
+                // --- APPLY REDUCTION ---
                 if (taperMethod === 'absolute') {
                     currentConc -= absDropSize; 
                 } else {
@@ -358,17 +423,15 @@
                 safety++;
             }
 
-            // Final zero step if needed
+            // Final Zero Step
             if (chartData[chartData.length-1] > baselineConc * 100 + 0.1) {
-                 // Calculate final drop
                  let finalDrop = ((previousConc - baselineConc) / previousConc) * 100;
                  addRow(step, 0, 0, baselineConc * 100, finalDrop);
                  chartLabels.push(step);
                  chartData.push(baselineConc * 100);
             }
 
-
-            // 3. Generate Chart (FIXED for "Canvas already in use")
+            // --- UPDATE CHART ---
             if (typeof Chart !== 'undefined') {
                 updateChart(chartLabels, chartData);
             }
@@ -396,13 +459,8 @@
 
     function updateChart(labels, data) {
         const ctx = document.getElementById('taperChart').getContext('2d');
-        
-        // --- FIX: CHECK AND DESTROY EXISTING CHART INSTANCE ---
         const existingChart = Chart.getChart("taperChart");
-        if (existingChart) {
-            existingChart.destroy();
-        }
-        // -----------------------------------------------------
+        if (existingChart) existingChart.destroy();
 
         new Chart(ctx, {
             type: 'line',
@@ -432,6 +490,7 @@
     updateR0();
     populateDropdown();
     toggleInputMode(); 
+    toggleCalibMode(); // Initialize calib mode
     updatePreviewLabels(); 
 </script>
 
