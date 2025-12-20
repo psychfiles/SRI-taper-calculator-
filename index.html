@@ -1,3 +1,6 @@
+from IPython.display import HTML, display
+
+html_code = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -43,6 +46,26 @@
         .question-header { font-weight: 600; color: #2c3e50; margin-bottom: 10px; min-height: 40px;}
         
         .calib-toggle { background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #eee; }
+        
+        .guidance-box { 
+            font-size: 14px; 
+            color: #444; 
+            font-style: italic; 
+            background: #fff3cd; 
+            padding: 15px; 
+            border-left: 5px solid #ffc107; 
+            margin-bottom: 20px; 
+            border-radius: 4px;
+            line-height: 1.5;
+        }
+
+        .references {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            font-size: 12px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -167,6 +190,11 @@
 
     <div id="tableContainer" style="display:none;">
         <h3>Generated Biological Taper Plan</h3>
+        
+        <div class="guidance-box">
+            General guidance suggests that each dose reduction should be maintained for at least 2-4 weeks before further dose reductions<sup>1</sup>. Withdrawal symptoms should either resolve, or be mild, before moving to the next step in the taper.
+        </div>
+
         <table id="taperTable">
             <thead>
                 <tr>
@@ -184,6 +212,11 @@
     <div style="margin-top: 30px;">
         <canvas id="taperChart" style="max-height: 300px;"></canvas>
     </div>
+</div>
+
+<div class="references">
+    <p><strong>Reference:</strong></p>
+    <p>1. Horowitz, M. A., & Taylor, D. M. (2024). <em>The Maudsley Deprescribing Guidelines: Antidepressants, Benzodiazepines, Gabapentinoids and Z-drugs</em>. Wiley-Blackwell.</p>
 </div>
 
 <script>
@@ -496,3 +529,6 @@
 
 </body>
 </html>
+"""
+
+display(HTML(html_code))
